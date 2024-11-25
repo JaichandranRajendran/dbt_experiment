@@ -1,0 +1,20 @@
+# Run all dbt commands in sequence based on materialized types
+dbt_run:
+	@echo "Starting dbt runs based on materialization types..."
+
+	# Stage 1: Run models materialized as 'table'
+	@echo "Running dbt for models materialized as 'table'..."
+	dbt run --profiles-dir $(DBT_PROFILES_DIR) --project-dir $(DBT_PROJECT_DIR) --profile $(DBT_PROFILE) --target $(DBT_TARGET) \
+		$(DBT_STATE_MODIFIED_FLAGS) $(DBT_DEFER_FLAGS) --selector type:table
+
+	# Stage 2: Run models materialized as 'incremental'
+	@echo "Running dbt for models materialized as 'incremental'..."
+	dbt run --profiles-dir $(DBT_PROFILES_DIR) --project-dir $(DBT_PROJECT_DIR) --profile $(DBT_PROFILE) --target $(DBT_TARGET) \
+		$(DBT_STATE_MODIFIED_FLAGS) $(DBT_DEFER_FLAGS) --selector type:incremental
+
+	# Stage 3: Run models materialized as 'view'
+	@echo "Running dbt for models materialized as 'view'..."
+	dbt run --profiles-dir $(DBT_PROFILES_DIR) --project-dir $(DBT_PROJECT_DIR) --profile $(DBT_PROFILE) --target $(DBT_TARGET) \
+		$(DBT_STATE_MODIFIED_FLAGS) $(DBT_DEFER_FLAGS) --selector type:view
+
+	@echo "Completed all dbt runs."
