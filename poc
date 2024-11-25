@@ -1,20 +1,20 @@
-# Run all dbt commands in sequence based on materialized types
+# Run all dbt commands in sequence based on selectors
 dbt_run:
-	@echo "Starting dbt runs based on materialization types..."
+	@echo "Starting dbt runs in the specified sequence..."
 
-	# Stage 1: Run models materialized as 'table'
-	@echo "Running dbt for models materialized as 'table'..."
+	# Stage 1: Run models with materialization type 'apitable_schema'
+	@echo "Running dbt for models with materialization type 'apitable_schema'..."
 	dbt run --profiles-dir $(DBT_PROFILES_DIR) --project-dir $(DBT_PROJECT_DIR) --profile $(DBT_PROFILE) --target $(DBT_TARGET) \
-		$(DBT_STATE_MODIFIED_FLAGS) $(DBT_DEFER_FLAGS) --selector type:table
+		$(DBT_STATE_MODIFIED_FLAGS) $(DBT_DEFER_FLAGS) --select type:apitable_schema
 
-	# Stage 2: Run models materialized as 'incremental'
-	@echo "Running dbt for models materialized as 'incremental'..."
+	# Stage 2: Run models with materialization type 'apitable'
+	@echo "Running dbt for models with materialization type 'apitable'..."
 	dbt run --profiles-dir $(DBT_PROFILES_DIR) --project-dir $(DBT_PROJECT_DIR) --profile $(DBT_PROFILE) --target $(DBT_TARGET) \
-		$(DBT_STATE_MODIFIED_FLAGS) $(DBT_DEFER_FLAGS) --selector type:incremental
+		$(DBT_STATE_MODIFIED_FLAGS) $(DBT_DEFER_FLAGS) --select type:apitable
 
-	# Stage 3: Run models materialized as 'view'
-	@echo "Running dbt for models materialized as 'view'..."
+	# Stage 3: Run all other models, excluding 'apitable_schema' and 'apitable'
+	@echo "Running dbt for all other models, excluding 'apitable_schema' and 'apitable'..."
 	dbt run --profiles-dir $(DBT_PROFILES_DIR) --project-dir $(DBT_PROJECT_DIR) --profile $(DBT_PROFILE) --target $(DBT_TARGET) \
-		$(DBT_STATE_MODIFIED_FLAGS) $(DBT_DEFER_FLAGS) --selector type:view
+		$(DBT_STATE_MODIFIED_FLAGS) $(DBT_DEFER_FLAGS) --exclude type:apitable_schema type:apitable
 
 	@echo "Completed all dbt runs."
