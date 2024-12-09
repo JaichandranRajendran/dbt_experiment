@@ -4,7 +4,7 @@
 KEYS_FILE="kms_keys.txt"
 
 # Output results file
-RESULTS_FILE="kms_key_full_details.txt"
+RESULTS_FILE="kms_key_descriptions.txt"
 
 # Generate the keys file if it doesn't exist
 if [ ! -f "$KEYS_FILE" ]; then
@@ -19,13 +19,10 @@ fi
 while read -r KEY_ID; do
     echo "Fetching details for key: $KEY_ID" | tee -a $RESULTS_FILE
     
-    # Run describe-key and capture all output (stdout and stderr)
-    DESCRIBE_OUTPUT=$(aws kms describe-key --key-id "$KEY_ID" --output text 2>&1)
+    # Directly execute the command and append output to results file
+    aws kms describe-key --key-id "$KEY_ID" --output text | tee -a $RESULTS_FILE
     
-    # Print the entire output to the results file and console
-    echo "$DESCRIBE_OUTPUT" | tee -a $RESULTS_FILE
-    
-    # Add a separator for clarity
+    # Add a separator for readability
     echo "----------------------------------------" | tee -a $RESULTS_FILE
 done < $KEYS_FILE
 
