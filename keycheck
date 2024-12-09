@@ -21,6 +21,9 @@ while IFS= read -r KEY_ID; do
         continue
     fi
 
+    # Trim leading/trailing spaces (just in case)
+    KEY_ID=$(echo "$KEY_ID" | xargs)
+
     echo "Fetching details for key: $KEY_ID"
 
     # Directly execute the describe-key command and echo the output
