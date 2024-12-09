@@ -1,34 +1,50 @@
 #!/bin/bash
 
-# File containing all key IDs
+# Input file containing all key IDs (one per line)
 KEYS_FILE="kms_keys.txt"
+
+# Output file for storing results
+OUTPUT_FILE="kms_key_results.txt"
 
 # Check if the keys file exists and is not empty
 if [ ! -f "$KEYS_FILE" ]; then
-    echo "Error: $KEYS_FILE not found. Exiting."
+    echo "Error: File '$KEYS_FILE' not found. Please provide a valid file with key IDs."
     exit 1
 fi
 
 if [ ! -s "$KEYS_FILE" ]; then
-    echo "Error: $KEYS_FILE is empty. Exiting."
+    echo "Error: File '$KEYS_FILE' is empty. Please add key IDs (one per line)."
     exit 1
 fi
 
-# Process each key ID line-by-line
+# Clear the output file or create it if it doesn't exist
+> "$OUTPUT_FILE"
+
+echo "Starting to fetch KMS key details..." | tee -a "$OUTPUT_FILE"
+echo "Processing keys from: $KEYS_FILE" | tee -a "$OUTPUT_FILE"
+echo "----------------------------------------" | tee -a "$OUTPUT_FILE"
+
+# Process each key ID from the file
 while IFS= read -r KEY_ID; do
-    # Skip empty lines or whitespace
-    if [ -z "$KEY_ID" ]; then
+    # Skip empty or whitespace-only lines
+    if [[ -z "$KEY_ID" ]]; then
         continue
     fi
 
-    # Trim leading/trailing spaces (just in case)
+    # Trim leading/trailing whitespace
     KEY_ID=$(echo "$KEY_ID" | xargs)
 
-    echo "Fetching details for key: $KEY_ID"
+    echo "Fetching details for key: $KEY_ID" | tee -a "$OUTPUT_FILE"
 
-    # Directly execute the describe-key command and echo the output
-    aws kms describe-key --key-id "$KEY_ID" --output text || echo "Error fetching details for key: $KEY_ID"
+    # Fetch the key details using AWS CLI
+    if aws kms describe-key --key-id "$KEY_ID" --output text >> "$OUTPUT_FILE" 2>&1; then
+        echo "Successfully fetched details for key: $KEY_ID" | tee -a "$OUTPUT_FILE"
+    else
+        echo "Error: Unable to fetch details for key: $KEY_ID" | tee -a "$OUTPUT_FILE"
+    fi
 
-    # Add a separator for clarity
-    echo "----------------------------------------"
+    # Add a separator for readability
+    echo "----------------------------------------" | tee -a "$OUTPUT_FILE"
 done < "$KEYS_FILE"
+
+echo "Completed processing all keys." | tee -a "$OUTPUT_FILE"
