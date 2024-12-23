@@ -1,36 +1,67 @@
-Topic Name: Revolutionizing Data Access: Semantic Search and Intelligent Text-to-SQL Generation for DBT Models
-Pitch
-Empower data exploration and accessibility like never before with an advanced solution that combines semantic search and text-to-SQL generation for DBT models. This system transforms the way users interact with data by enabling natural language queries, making complex data models accessible to everyone, regardless of their technical expertise. With this unified approach, users can find, understand, and query data models effortlessly, driving deeper insights and quicker decisions across the organization.
-Revolutionizing Data Access for Cyber Operations: This solution empowers cyber operations teams with unprecedented access to critical data insights through natural language queries. By combining semantic search with intelligent text-to-SQL generation for DBT models, we enable analysts and operators to find, understand, and query data without needing specialized SQL knowledge. This capability accelerates decision-making, enhances situational awareness, and enables rapid response by allowing teams to retrieve relevant data models and generate actionable queries instantly.
+from pyspark.sql import SparkSession
 
-With this tool, cyber operations can efficiently navigate vast data landscapes, uncover hidden patterns, and make data-driven decisions with confidence, advancing mission effectiveness and reducing the time to threat identification and mitigation.
-Planned Deliverable(s)
-Comprehensive Semantic Search: An intuitive interface where users can search for DBT models based on natural language queries, leveraging semantic embeddings to find relevant models without needing to know specific SQL syntax or database structures.
-Intelligent Text-to-SQL Generation: A text-to-SQL generator that interprets user queries and dynamically generates SQL code, tailored specifically to DBT models. Users simply describe what they need in plain language, and the system produces precise SQL statements.
-Scalable and Maintainable Metadata Management: A robust backend system that indexes and updates DBT model metadata for seamless retrieval, ensuring that search and query generation remain accurate and up-to-date.
-User-Friendly UI: A sleek, accessible interface where users of all skill levels can effortlessly interact with DBT models through natural language queries.
-Technologies/Services
-DBT (Data Build Tool): As the core transformation layer, DBT structures data into models that are accessible through the semantic search and text-to-SQL system.
-LangChain: Orchestrates the system with retrieval-augmented generation (RAG), enabling powerful integrations between language models, retrievers, and vector databases.
-Hugging Face Transformers / Sentence Transformers: For generating embeddings that represent the semantics of DBT model metadata, allowing effective similarity search.
-Local Language Model (GPT4All / LLaMA): Provides offline text-to-SQL capabilities, ensuring that user queries are transformed into accurate SQL statements.
-Vector Database (Pinecone / Weaviate / FAISS): Stores and indexes embeddings of DBT models, enabling fast and accurate semantic search across thousands of models.
-OpenAI API: (Optional) For high-quality embeddings or SQL generation in case of cloud-based deployments.
-UI/UX Development: Crafts a streamlined, intuitive user interface to make interactions with data models simple and effective.
-Key Benefits
-Enhanced Accessibility: Removes the technical barrier of SQL, making data accessible to a wider audience.
-Rapid Insights: Quickly locate relevant data models and generate queries with minimal effort, accelerating decision-making processes.
-Reduced Dependency on Data Experts: Empowers non-technical users to self-serve their data needs, freeing up time for data teams to focus on strategic initiatives.
-Scalability: Built to scale as the number of DBT models grows, with a robust indexing and retrieval system.
-Risks and Mitigations
-SQL Accuracy: Ensuring the generated SQL aligns with user intent may be challenging, especially with complex or vague queries. Mitigation: Fine-tune the language model and incorporate feedback loops for continuous improvement.
-Performance: Large queries or poorly optimized SQL could strain database resources. Mitigation: Implement query optimization and restrict access to complex queries based on role or usage patterns.
-Data Consistency: As DBT models evolve, ensuring up-to-date metadata indexing is critical. Mitigation: Automate periodic re-indexing and metadata syncs.
-Security: Ensure that generated SQL respects data access controls and doesn’t expose sensitive data. Mitigation: Implement strict role-based access and query validation.
-This solution combines semantic search with intelligent text-to-SQL capabilities, making it a groundbreaking tool for any organization using DBT. It democratizes data access, reduces dependency on data specialists, and accelerates insights, all while maintaining scalability and security.
+# Initialize a Spark session with necessary configurations for AWS S3 access
+spark = SparkSession.builder \
+    .appName("S3 CSV Header Merge") \
+    .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
+    .config("spark.hadoop.fs.s3a.access.key", "YOUR_ACCESS_KEY") \
+    .config("spark.hadoop.fs.s3a.secret.key", "YOUR_SECRET_KEY") \
+    .getOrCreate()
 
+# Core parts of the expected column names (e.g., any expected prefix or keyword)
+expected_core_names = ["changerequest", "cidetails"]
 
+def contains_expected_prefix(column, expected_parts):
+    """
+    Check if any part of the expected header keywords exists in the column name.
+    """
+    return any(part in column.lower() for part in expected_parts)
 
+def is_header(columns, expected_parts):
+    """
+    Check if the columns in the DataFrame likely represent headers based on expected keywords.
+    """
+    return all(contains_expected_prefix(col, expected_parts) for col in columns)
 
+# S3 bucket path containing your CSV files
+bucket_path = 's3a://your-bucket-name/path/to/csv/files/'
 
+# List of CSV files in the bucket (Spark can handle this listing if configured correctly)
+csv_files = spark.sparkContext.wholeTextFiles(bucket_path + "*.csv").keys().collect()
 
+headers = None
+header_file = None
+non_header_files = []
+
+# Identify the file with headers and separate the ones without headers
+for file_path in csv_files:
+    df_test = spark.read.format("csv").option("inferSchema", "true").load(file_path).limit(10)
+    if is_header(df_test.columns, expected_core_names):
+        headers = df_test.columns
+        header_file = file_path
+    else:
+        non_header_files.append(file_path)
+
+# Now read the file with headers correctly
+df_with_header = spark.read.format("csv").option("header", "true").load(header_file)
+
+# Read files without headers using the identified headers from the file with headers
+dataframes = [df_with_header]
+for file_path in non_header_files:
+    df_no_header = spark.read.format("csv").option("header", "false").load(file_path).toDF(*headers)
+    dataframes.append(df_no_header)
+
+# Union all dataframes by column names
+combined_df = dataframes[0]
+for df in dataframes[1:]:
+    combined_df = combined_df.unionByName(df)
+
+# Transform data (example: filling missing values)
+combined_df = combined_df.na.fill("Default Value")
+
+# Load data (example: saving to a new combined CSV in S3)
+output_path = 's3a://your-bucket-name/path/to/save/combined_csv.csv'
+combined_df.write.format("csv").option("header", "true").save(output_path)
+
+# Stop the Spark session
+spark.stop()
