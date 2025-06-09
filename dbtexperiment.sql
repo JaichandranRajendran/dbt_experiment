@@ -1,23 +1,28 @@
-{% macro get_active_table_objects() %}
-  {% set current_models = [] %}
-  {% for node in graph.nodes.values() | selectattr("resource_type", "in", ["model", "seed", "snapshot"]) %}
-    {% do current_models.append(node.name) %}
-  {% endfor %}
+import yaml
+import os
+from trino.dbapi import connect
 
-  {% set schema_tables_query %}
-    SELECT table_name
-    FROM {{ target.database }}.INFORMATION_SCHEMA.TABLES
-    WHERE table_schema = '{{ target.schema }}'
-  {% endset %}
+# Load dbt profile
+def load_dbt_trino_profile(profile_name='my_project', target_name='dev'):
+    profile_path = os.path.expanduser("~/.dbt/profiles.yml")
+    with open(profile_path, 'r') as f:
+        profiles = yaml.safe_load(f)
+    profile = profiles[profile_name]['outputs'][target_name]
 
-  {% set db_tables = run_query(schema_tables_query).columns[0].values() %}
+    return connect(
+        host=profile['host'],
+        port=profile['port'],
+        user=profile['user'],
+        catalog=profile['catalog'],
+        schema=profile['schema'],
+        http_scheme=profile.get('http_scheme', 'http'),
+        auth=None,  # Optional: Add auth logic if needed
+    )
 
-  {% set active_tables = db_tables | select("upper") | intersect(current_models | map("upper") | list) %}
+# Use the connection
+conn = load_dbt_trino_profile()
+cursor = conn.cursor()
+cursor.execute("EXPLAIN SELECT * FROM analytics.my_table")
+plan = cursor.fetchall()[0][0]
+print(plan)
 
-  {% do log("Active tables with dbt models:", info=True) %}
-  {% for table in active_tables %}
-    {% do log(table, info=True) %}
-  {% endfor %}
-
-  {{ return(active_tables) }}
-{% endmacro %}
