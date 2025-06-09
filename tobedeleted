@@ -1,67 +1,53 @@
+import sys
+from pyspark.context import SparkContext
+from awsglue.context import GlueContext
+from datetime import datetime
 from pyspark.sql import SparkSession
 
-# Initialize a Spark session with necessary configurations for AWS S3 access
+# Initialize Spark session with Iceberg configs
 spark = SparkSession.builder \
-    .appName("S3 CSV Header Merge") \
-    .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
-    .config("spark.hadoop.fs.s3a.access.key", "YOUR_ACCESS_KEY") \
-    .config("spark.hadoop.fs.s3a.secret.key", "YOUR_SECRET_KEY") \
+    .config("spark.sql.catalog.glue_catalog", "org.apache.iceberg.spark.SparkCatalog") \
+    .config("spark.sql.catalog.glue_catalog.warehouse", "s3://your-bucket/path/") \
+    .config("spark.sql.catalog.glue_catalog.catalog-impl", "org.apache.iceberg.aws.glue.GlueCatalog") \
+    .config("spark.sql.catalog.glue_catalog.io-impl", "org.apache.iceberg.aws.s3.S3FileIO") \
+    .enableHiveSupport() \
     .getOrCreate()
 
-# Core parts of the expected column names (e.g., any expected prefix or keyword)
-expected_core_names = ["changerequest", "cidetails"]
+glueContext = GlueContext(SparkContext.getOrCreate())
 
-def contains_expected_prefix(column, expected_parts):
-    """
-    Check if any part of the expected header keywords exists in the column name.
-    """
-    return any(part in column.lower() for part in expected_parts)
+# Config
+catalog_name = "glue_catalog"
+database_name = "your_db"
+table_name = "your_table"
+partition_col = "your_partition_column"  # e.g., "event_date"
+full_table_name = f"{catalog_name}.{database_name}.{table_name}"
 
-def is_header(columns, expected_parts):
-    """
-    Check if the columns in the DataFrame likely represent headers based on expected keywords.
-    """
-    return all(contains_expected_prefix(col, expected_parts) for col in columns)
+try:
+    # Step 1: Get distinct partitions
+    df = spark.read.format("iceberg").load(full_table_name)
+    partitions = df.select(partition_col).distinct().orderBy(partition_col, ascending=False)
+    partition_values = [row[partition_col] for row in partitions.collect()]
 
-# S3 bucket path containing your CSV files
-bucket_path = 's3a://your-bucket-name/path/to/csv/files/'
+    # Step 2: Skip last 2 partitions
+    if len(partition_values) <= 2:
+        raise Exception("Not enough partitions to optimize after skipping the last two.")
 
-# List of CSV files in the bucket (Spark can handle this listing if configured correctly)
-csv_files = spark.sparkContext.wholeTextFiles(bucket_path + "*.csv").keys().collect()
+    partitions_to_optimize = partition_values[2:]
+    print(f"Starting optimization on {len(partitions_to_optimize)} partitions...")
 
-headers = None
-header_file = None
-non_header_files = []
+    # Step 3: Optimize each partition
+    for value in partitions_to_optimize:
+        print(f"Optimizing partition: {partition_col} = '{value}'")
+        try:
+            spark.sql(f"""
+                CALL {catalog_name}.system.optimize('{database_name}.{table_name}', 
+                    '{partition_col}={value}')
+            """)
+        except Exception as e:
+            raise Exception(f"Optimization failed for partition {value}: {str(e)}")
 
-# Identify the file with headers and separate the ones without headers
-for file_path in csv_files:
-    df_test = spark.read.format("csv").option("inferSchema", "true").load(file_path).limit(10)
-    if is_header(df_test.columns, expected_core_names):
-        headers = df_test.columns
-        header_file = file_path
-    else:
-        non_header_files.append(file_path)
+    print("✅ Optimization completed successfully.")
 
-# Now read the file with headers correctly
-df_with_header = spark.read.format("csv").option("header", "true").load(header_file)
-
-# Read files without headers using the identified headers from the file with headers
-dataframes = [df_with_header]
-for file_path in non_header_files:
-    df_no_header = spark.read.format("csv").option("header", "false").load(file_path).toDF(*headers)
-    dataframes.append(df_no_header)
-
-# Union all dataframes by column names
-combined_df = dataframes[0]
-for df in dataframes[1:]:
-    combined_df = combined_df.unionByName(df)
-
-# Transform data (example: filling missing values)
-combined_df = combined_df.na.fill("Default Value")
-
-# Load data (example: saving to a new combined CSV in S3)
-output_path = 's3a://your-bucket-name/path/to/save/combined_csv.csv'
-combined_df.write.format("csv").option("header", "true").save(output_path)
-
-# Stop the Spark session
-spark.stop()
+except Exception as e:
+    print(f"❌ Job failed: {str(e)}")
+    sys.exit(1)
