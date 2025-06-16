@@ -4,11 +4,11 @@ from pyspark.context import SparkContext
 from awsglue.context import GlueContext
 from pyspark.sql import SparkSession
 
-# Initialize Glue + Spark session
+# Initialize Spark + Glue Context
 spark = SparkSession.builder \
     .config("spark.sql.catalog.glue_catalog", "org.apache.iceberg.spark.SparkCatalog") \
     .config("spark.sql.catalog.glue_catalog.catalog-impl", "org.apache.iceberg.aws.glue.GlueCatalog") \
-    .config("spark.sql.catalog.glue_catalog.warehouse", "s3://your-bucket/path/") \
+    .config("spark.sql.catalog.glue_catalog.warehouse", "s3://your-bucket/warehouse/") \
     .config("spark.sql.catalog.glue_catalog.io-impl", "org.apache.iceberg.aws.s3.S3FileIO") \
     .enableHiveSupport() \
     .getOrCreate()
@@ -17,52 +17,32 @@ glueContext = GlueContext(SparkContext.getOrCreate())
 
 # Configuration
 catalog_name = "glue_catalog"
-db_name = "your_db"
+db_name = "your_database"
 table_name = "your_table"
-partition_col = "your_partition_col"  # e.g., 'event_date'
-full_table = f"{catalog_name}.{db_name}.{table_name}"
+full_table_name = f"{catalog_name}.{db_name}.{table_name}"
 
-# Expire snapshots older than N days
+# Number of days to retain snapshots
 expire_snapshots_older_than_days = 7
 
 try:
-    # Step 1: Fetch partition values in descending order
-    df = spark.read.format("iceberg").load(full_table)
-    partitions = df.select(partition_col).distinct().orderBy(partition_col.desc())
-    partition_values = [row[partition_col] for row in partitions.collect()]
-
-    if len(partition_values) <= 2:
-        raise Exception("Not enough partitions to optimize (need more than 2).")
-
-    # Step 2: Skip n and n-1 partitions
-    partitions_to_optimize = partition_values[2:]
-
-    print(f"\n📦 Optimizing {len(partitions_to_optimize)} partitions...")
-
-    for value in partitions_to_optimize:
-        print(f"🔧 Optimizing partition: {partition_col} = '{value}'")
-        spark.sql(f"""
-            CALL {catalog_name}.system.optimize(
-                '{db_name}.{table_name}', 
-                '{partition_col}={value}'
-            )
-        """)
-
+    # ✅ Step 1: Optimize the entire Iceberg table (includes hidden partitions)
+    print(f"\n📦 Optimizing all partitions of table: {full_table_name}")
+    spark.sql(f"""
+        CALL {catalog_name}.system.optimize('{db_name}.{table_name}')
+    """)
     print("✅ Optimization complete.")
 
-    # Step 3: Expire old snapshots
+    # ✅ Step 2: Expire old snapshots
     expiration_cutoff = datetime.utcnow() - timedelta(days=expire_snapshots_older_than_days)
     expiration_str = expiration_cutoff.strftime('%Y-%m-%d %H:%M:%S')
 
     print(f"\n🧹 Expiring snapshots older than: {expiration_str}")
-
     spark.sql(f"""
         CALL {catalog_name}.system.expire_snapshots(
             '{db_name}.{table_name}',
             TIMESTAMP '{expiration_str}'
         )
     """)
-
     print("✅ Snapshot expiration complete.")
 
 except Exception as e:
